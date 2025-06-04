@@ -9,6 +9,7 @@ import (
 	"encoding/gob"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 
 	"github.com/absmach/magistrala/alarms"
 	"github.com/absmach/senml"
@@ -19,30 +20,39 @@ import (
 func luaEncrypt(l *lua.LState) int {
 	key, iv, data, err := decodeParams(l)
 	if err != nil {
-		return 1
+		l.Push(lua.LNil)
+		l.Push(lua.LString(fmt.Sprintf("failed to decode params: %v", err)))
+		return 2
 	}
+
 	enc, err := encrypt(key, iv, data)
 	if err != nil {
-		l.RaiseError("Falied to encrypt: %v", err)
-		return 0
+		l.Push(lua.LNil)
+		l.Push(lua.LString(fmt.Sprintf("failed to encrypt: %v", err)))
+		return 2
 	}
 	l.Push(lua.LString(hex.EncodeToString(enc)))
+
 	return 1
 }
 
 func luaDecrypt(l *lua.LState) int {
 	key, iv, data, err := decodeParams(l)
 	if err != nil {
-		return 1
+		l.Push(lua.LNil)
+		l.Push(lua.LString(fmt.Sprintf("failed to decode params: %v", err)))
+		return 2
 	}
 
 	dec, err := decrypt(key, iv, data)
 	if err != nil {
-		l.RaiseError("Falied to decrypt: %v", err)
-		return 0
+		l.Push(lua.LNil)
+		l.Push(lua.LString(fmt.Sprintf("failed to decrypt: %v", err)))
+		return 2
 	}
 
 	l.Push(lua.LString(hex.EncodeToString(dec)))
+
 	return 1
 }
 
@@ -53,22 +63,51 @@ func decodeParams(l *lua.LState) (key, iv, data []byte, err error) {
 
 	key, err = hex.DecodeString(keyStr)
 	if err != nil {
-		l.RaiseError("Failed to decode key: %v", err)
-		return
+		return nil, nil, nil, fmt.Errorf("failed to decode key: %v", err)
 	}
 
 	iv, err = hex.DecodeString(ivStr)
 	if err != nil {
-		l.RaiseError("Failed to decode IV: %v", err)
-		return
+		return nil, nil, nil, fmt.Errorf("failed to decode IV: %v", err)
 	}
 
 	data, err = hex.DecodeString(dataStr)
 	if err != nil {
-		l.RaiseError("Failed to decode data: %v", err)
-		return
+		return nil, nil, nil, fmt.Errorf("failed to decode data: %v", err)
 	}
-	return
+
+	return key, iv, data, nil
+}
+
+func decodeDateParams(l *lua.LState) (date_hex []byte, err error) {
+	date_hex_str := l.ToString(1)
+
+	date_bytes, err := hex.DecodeString(date_hex_str)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode date string: %v", err)
+	}
+
+	return date_bytes, nil
+}
+
+func luaDecodeDate(l *lua.LState) int {
+	date_bytes, err := decodeDateParams(l)
+	if err != nil {
+		l.Push(lua.LNil)
+		l.Push(lua.LString(fmt.Sprintf("failed to decode params: %v", err)))
+		return 2
+	}
+
+	dec_date, err := dateConv(date_bytes)
+	if err != nil {
+		l.Push(lua.LNil)
+		l.Push(lua.LString(fmt.Sprintf("failed to decode date: %v", err)))
+		return 2
+	}
+
+	l.Push(lua.LString(string(dec_date)))
+
+	return 1
 }
 
 func (re *re) sendEmail(l *lua.LState) int {
@@ -86,6 +125,7 @@ func (re *re) sendEmail(l *lua.LState) int {
 	if err := re.email.SendEmailNotification(recipients, "", subject, "", "", content, "", make(map[string][]byte)); err != nil {
 		return 0
 	}
+
 	return 1
 }
 
@@ -169,6 +209,7 @@ func (re *re) saveSenml(ctx context.Context, val interface{}, msg *messaging.Mes
 	if err := re.writersPub.Publish(ctx, msg.Channel, m); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -190,5 +231,6 @@ func (re *re) publishChannel(ctx context.Context, val interface{}, channel, subt
 	if err := re.rePubSub.Publish(ctx, channel, m); err != nil {
 		return err
 	}
+
 	return nil
 }
